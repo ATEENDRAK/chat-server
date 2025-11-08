@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatStream - Real-time Chat Application</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>ChatStream</h1>
+            <div class="user-info" id="userInfo" style="display: none;">
+                <span id="currentUser"></span>
+                <span id="currentRoom"></span>
+            </div>
+        </header>
+
+        <!-- Login Form -->
+        <div class="login-container" id="loginContainer">
+            <div class="login-form">
+                <h2>Join Chat</h2>
+                <input type="text" id="usernameInput" placeholder="Enter your username" maxlength="20">
+                <button id="joinBtn">Join Chat</button>
+            </div>
+        </div>
+
+        <!-- Chat Interface -->
+        <div class="chat-container" id="chatContainer" style="display: none;">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="sidebar-section">
+                    <h3>Rooms</h3>
+                    <div class="room-controls">
+                        <input type="text" id="roomNameInput" placeholder="Room name">
+                        <button id="createRoomBtn">Create</button>
+                    </div>
+                    <div class="rooms-list" id="roomsList"></div>
+                </div>
+                
+                <div class="sidebar-section">
+                    <h3>Online Users</h3>
+                    <div class="users-list" id="usersList"></div>
+                </div>
+            </div>
+
+            <!-- Main Chat Area -->
+            <div class="main-chat">
+                <div class="chat-header">
+                    <h2 id="chatTitle">Select a room to start chatting</h2>
+                    <div class="chat-actions">
+                        <button id="leaveRoomBtn" style="display: none;">Leave Room</button>
+                    </div>
+                </div>
+                
+                <div class="messages-container" id="messagesContainer">
+                    <div class="messages" id="messages"></div>
+                </div>
+                
+                <div class="message-input-container" id="messageInputContainer" style="display: none;">
+                    <div class="message-input">
+                        <input type="text" id="messageInput" placeholder="Type your message..." maxlength="500">
+                        <button id="sendBtn">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Private Chat Modal -->
+        <div class="modal" id="privateChatModal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Private Chat with <span id="privateUsername"></span></h3>
+                    <button class="close-btn" id="closePrivateChat">&times;</button>
+                </div>
+                <div class="private-messages" id="privateMessages"></div>
+                <div class="private-input">
+                    <input type="text" id="privateMessageInput" placeholder="Type private message...">
+                    <button id="sendPrivateBtn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
