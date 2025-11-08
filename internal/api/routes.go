@@ -12,14 +12,14 @@ import (
 
 // Hub interface for API handlers
 type Hub interface {
-	Register(client client.Client)
-	Unregister(client client.Client)
+	Register(client *client.Client)
+	Unregister(client *client.Client)
 	Broadcast(message *models.Message)
 	SendToUser(userID string, message *models.Message)
-	JoinRoom(client client.Client, roomID string)
-	LeaveRoom(client client.Client, roomID string)
+	JoinRoom(client *client.Client, roomID string)
+	LeaveRoom(client *client.Client, roomID string)
 	GetRooms() map[string]*models.Room
-	GetUsers() map[string]client.Client
+	GetUsers() map[string]*client.Client
 	CreateRoom(name string) *models.Room
 }
 

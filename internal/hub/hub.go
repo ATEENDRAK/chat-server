@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"chatstreamapp/internal/client"
 	"chatstreamapp/internal/logger"
 	"chatstreamapp/internal/models"
 	"sync"
@@ -9,21 +10,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// Client interface for hub to work with clients
-type Client interface {
-	SendMessage(message *models.Message)
-	GetUser() *models.User
-	GetRoomID() string
-	SetRoomID(roomID string)
-}
-
 // Hub maintains the set of active clients and broadcasts messages to the clients
 type Hub struct {
 	// Registered clients
-	clients map[Client]bool
+	clients map[*client.Client]bool
 
 	// User ID to client mapping for private messages
-	userClients map[string]Client
+	userClients map[string]*client.Client
 
 	// Rooms
 	rooms map[string]*models.Room
@@ -32,10 +25,10 @@ type Hub struct {
 	broadcast chan *models.Message
 
 	// Register requests from the clients
-	register chan Client
+	register chan *client.Client
 
 	// Unregister requests from clients
-	unregister chan Client
+	unregister chan *client.Client
 
 	// Private message channel
 	privateMessage chan *PrivateMessage
@@ -56,19 +49,19 @@ type PrivateMessage struct {
 
 // RoomOperation represents a room join/leave operation
 type RoomOperation struct {
-	Client Client
+	Client *client.Client
 	RoomID string
 }
 
 // NewHub creates a new Hub
 func NewHub() *Hub {
 	return &Hub{
-		clients:        make(map[Client]bool),
-		userClients:    make(map[string]Client),
+		clients:        make(map[*client.Client]bool),
+		userClients:    make(map[string]*client.Client),
 		rooms:          make(map[string]*models.Room),
 		broadcast:      make(chan *models.Message),
-		register:       make(chan Client),
-		unregister:     make(chan Client),
+		register:       make(chan *client.Client),
+		unregister:     make(chan *client.Client),
 		privateMessage: make(chan *PrivateMessage),
 		joinRoom:       make(chan *RoomOperation),
 		leaveRoom:      make(chan *RoomOperation),
@@ -83,11 +76,11 @@ func (h *Hub) Run() {
 
 	for {
 		select {
-		case client := <-h.register:
-			h.registerClient(client)
+		case c := <-h.register:
+			h.registerClient(c)
 
-		case client := <-h.unregister:
-			h.unregisterClient(client)
+		case c := <-h.unregister:
+			h.unregisterClient(c)
 
 		case message := <-h.broadcast:
 			h.broadcastMessage(message)
@@ -105,12 +98,12 @@ func (h *Hub) Run() {
 }
 
 // Register adds a client to the hub
-func (h *Hub) Register(client Client) {
+func (h *Hub) Register(client *client.Client) {
 	h.register <- client
 }
 
 // Unregister removes a client from the hub
-func (h *Hub) Unregister(client Client) {
+func (h *Hub) Unregister(client *client.Client) {
 	h.unregister <- client
 }
 
@@ -128,7 +121,7 @@ func (h *Hub) SendToUser(userID string, message *models.Message) {
 }
 
 // JoinRoom adds a client to a room
-func (h *Hub) JoinRoom(client Client, roomID string) {
+func (h *Hub) JoinRoom(client *client.Client, roomID string) {
 	h.joinRoom <- &RoomOperation{
 		Client: client,
 		RoomID: roomID,
@@ -136,7 +129,7 @@ func (h *Hub) JoinRoom(client Client, roomID string) {
 }
 
 // LeaveRoom removes a client from a room
-func (h *Hub) LeaveRoom(client Client, roomID string) {
+func (h *Hub) LeaveRoom(client *client.Client, roomID string) {
 	h.leaveRoom <- &RoomOperation{
 		Client: client,
 		RoomID: roomID,
@@ -156,13 +149,13 @@ func (h *Hub) GetRooms() map[string]*models.Room {
 }
 
 // GetUsers returns all connected users
-func (h *Hub) GetUsers() map[string]Client {
+func (h *Hub) GetUsers() map[string]*client.Client {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	
-	users := make(map[string]Client)
-	for userID, client := range h.userClients {
-		users[userID] = client
+	users := make(map[string]*client.Client)
+	for userID, c := range h.userClients {
+		users[userID] = c
 	}
 	return users
 }
@@ -179,7 +172,7 @@ func (h *Hub) CreateRoom(name string) *models.Room {
 	return room
 }
 
-func (h *Hub) registerClient(client Client) {
+func (h *Hub) registerClient(client *client.Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -210,7 +203,7 @@ func (h *Hub) registerClient(client Client) {
 	client.SendMessage(roomsMessage)
 }
 
-func (h *Hub) unregisterClient(client Client) {
+func (h *Hub) unregisterClient(client *client.Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

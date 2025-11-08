@@ -3,7 +3,6 @@ package client
 import (
 	"chatstreamapp/internal/logger"
 	"chatstreamapp/internal/models"
-	"encoding/json"
 	"net/http"
 	"time"
 
