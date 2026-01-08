@@ -1,4 +1,5 @@
-import { VideoCall } from './video_call.js';
+import { PrivateVideoCall } from './private_video_call.js';
+import { GroupVideoCall } from './group_video_call.js';
 
 class ChatApp {
     constructor() {
@@ -483,7 +484,7 @@ let chatApp, groupVideoCall, privateVideoCall;
 document.addEventListener('DOMContentLoaded', () => {
     chatApp = new ChatApp();
     // Group video call
-    groupVideoCall = new VideoCall({
+    groupVideoCall = new GroupVideoCall({
         localVideoId: 'localVideo',
         remoteVideoId: 'remoteVideo',
         startBtnId: 'videoCallBtn',
@@ -493,18 +494,35 @@ document.addEventListener('DOMContentLoaded', () => {
         getPeerId: () => {
             // For group chat, pick the first other user in the room (demo purpose)
             const users = document.querySelectorAll('#usersList .user-item');
+            const availableUsers = [];
             for (let u of users) {
                 const userId = u.dataset.userid;
                 if (userId && userId !== (chatApp && chatApp.currentUser ? chatApp.currentUser.id : '')) {
-                    return userId;
+                    availableUsers.push({ id: userId, name: u.querySelector('span').textContent });
                 }
             }
-            // If no users found, prompt for user ID
-            const peerId = prompt('Enter peer user ID for video call:');
-            if (!peerId || peerId.trim() === '') {
+            
+            if (availableUsers.length === 0) {
+                alert('No other users available for video call. Please wait for someone to join.');
                 return null;
             }
-            return peerId.trim();
+            
+            if (availableUsers.length === 1) {
+                console.log('[GroupVideoCall] Selected peer:', availableUsers[0].id, availableUsers[0].name);
+                return availableUsers[0].id;
+            }
+            
+            // If multiple users, let user choose
+            const userList = availableUsers.map((u, idx) => `${idx + 1}. ${u.name} (${u.id})`).join('\n');
+            const choice = prompt(`Multiple users available. Enter number:\n${userList}`);
+            const choiceNum = parseInt(choice);
+            if (choiceNum >= 1 && choiceNum <= availableUsers.length) {
+                const selected = availableUsers[choiceNum - 1];
+                console.log('[GroupVideoCall] Selected peer:', selected.id, selected.name);
+                return selected.id;
+            }
+            
+            return null;
         },
         containerId: 'videoCallContainer',
         onCallStart: () => {
@@ -524,7 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     // Private video call
-    privateVideoCall = new VideoCall({
+    privateVideoCall = new PrivateVideoCall({
         localVideoId: 'privateLocalVideo',
         remoteVideoId: 'privateRemoteVideo',
         startBtnId: 'privateVideoCallBtn',

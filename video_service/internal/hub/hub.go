@@ -50,18 +50,28 @@ func NewHub() *Hub {
 	}
 }
 
+func (h *Hub) getClientIDs() []string {
+	ids := make([]string, 0, len(h.clients))
+	for id := range h.clients {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.Register:
 			h.mu.Lock()
 			h.clients[client.ID] = client
+			logger.Infof("Client registered: %s (total clients: %d)", client.ID, len(h.clients))
 			h.mu.Unlock()
 		case client := <-h.Unregister:
 			h.mu.Lock()
 			if _, ok := h.clients[client.ID]; ok {
 				delete(h.clients, client.ID)
 				close(client.Send)
+				logger.Infof("Client unregistered: %s (remaining clients: %d)", client.ID, len(h.clients))
 			}
 			h.mu.Unlock()
 		case msg := <-h.Broadcast:
@@ -85,9 +95,13 @@ func (h *Hub) Run() {
 				}
 				select {
 				case to.Send <- msgBytes:
+					logger.Infof("Message sent successfully to client: %s", msg.To)
 				default:
+					logger.Errorf("Client %s send channel full, dropping message", msg.To)
 					// drop if not ready
 				}
+			} else {
+				logger.Errorf("Target client not found: %s (available clients: %v)", msg.To, h.getClientIDs())
 			}
 			h.mu.RUnlock()
 		}

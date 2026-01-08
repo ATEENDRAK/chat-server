@@ -36,10 +36,12 @@ class VideoCall {
             return;
         }
         if (this.startBtn) this.startBtn.disabled = true; // Disable until ready
-        this.ws = new WebSocket(this.wsUrl + `?id=${myId}`);
+        const wsUrlWithId = this.wsUrl + `?id=${myId}`;
+        console.log('[VideoCall] Connecting to signaling server:', wsUrlWithId);
+        this.ws = new WebSocket(wsUrlWithId);
         this.ws.onopen = () => {
             this.isConnected = true;
-            console.log('[VideoCall] WebSocket opened');
+            console.log('[VideoCall] ✓ WebSocket opened and registered with ID:', myId);
             if (this.endBtn) this.endBtn.style.display = '';
             if (this.startBtn) this.startBtn.disabled = false; // Enable when ready
         };
@@ -54,10 +56,13 @@ class VideoCall {
             console.error('[VideoCall] WebSocket error', e);
         };
         this.ws.onmessage = async (evt) => {
-            const msg = JSON.parse(evt.data);
-            console.log('[VideoCall] WS message received:', msg);
-            const myId = this.getMyId();
+            try {
+                const msg = JSON.parse(evt.data);
+                const myId = this.getMyId();
+                console.log('[VideoCall] WS message received - Type:', msg.type, 'From:', msg.from, 'To:', msg.to, 'My ID:', myId);
+            
             if (msg.type === 'offer' && msg.data && msg.data.type && msg.data.sdp) {
+                console.log('[VideoCall] ✓ Received offer from:', msg.from);
                 // Incoming call offer (callee logic)
                 if (this.isCaller) {
                     // Ignore offers if this client is the caller
@@ -86,6 +91,7 @@ class VideoCall {
                 }
                 
                 try {
+                    console.log('[VideoCall] Callee accepting call from:', msg.from);
                     this.isCaller = false;
                     this.peerIdInCall = msg.from; // Always use the sender of the offer
                     this.inCall = true;
@@ -96,31 +102,66 @@ class VideoCall {
                     if (this.endBtn) this.endBtn.style.display = '';
                     
                     // Get local media stream first
+                    console.log('[VideoCall] Requesting local media stream...');
                     if (!this.localStream) {
                         this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                         this.localVideo.srcObject = this.localStream;
+                        console.log('[VideoCall] ✓ Local media stream obtained');
+                    } else {
+                        console.log('[VideoCall] Using existing local stream');
                     }
                     
-                    // Setup peer connection
-                    if (!this.pc) {
-                        this._setupPeerConnection(myId, this.peerIdInCall);
-                        // Add tracks BEFORE setting remote description
-                        this.localStream.getTracks().forEach(track => {
-                            this.pc.addTrack(track, this.localStream);
-                        });
+                    // Setup peer connection - MUST be done before setting remote description
+                    if (this.pc) {
+                        console.log('[VideoCall] Closing existing peer connection');
+                        this.pc.close();
+                        this.pc = null;
                     }
                     
+                    console.log('[VideoCall] Setting up peer connection with peer:', this.peerIdInCall);
+                    this._setupPeerConnection(myId, this.peerIdInCall);
+                    
+                    // Add tracks BEFORE setting remote description (critical for WebRTC)
+                    console.log('[VideoCall] Adding local tracks to peer connection');
+                    this.localStream.getTracks().forEach(track => {
+                        console.log('[VideoCall] Adding track:', track.kind, track.id);
+                        this.pc.addTrack(track, this.localStream);
+                    });
+                    
+                    // Set remote description (the offer from caller)
+                    console.log('[VideoCall] Setting remote description (offer)');
                     await this.pc.setRemoteDescription(new RTCSessionDescription(msg.data));
+                    console.log('[VideoCall] ✓ Remote description set');
+                    
+                    // Add any pending ICE candidates that arrived before remote description
                     this._addPendingCandidates();
+                    
+                    // Create and set local description (answer)
+                    console.log('[VideoCall] Creating answer...');
                     const answer = await this.pc.createAnswer();
+                    console.log('[VideoCall] ✓ Answer created');
+                    
                     await this.pc.setLocalDescription(answer);
-                    const answerMsg = { from: myId, to: this.peerIdInCall, type: 'answer', data: { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp } };
-                    console.log('[VideoCall] Sending answer:', answerMsg);
+                    console.log('[VideoCall] ✓ Local description (answer) set');
+                    
+                    const answerMsg = { 
+                        from: myId, 
+                        to: this.peerIdInCall, 
+                        type: 'answer', 
+                        data: { 
+                            type: this.pc.localDescription.type, 
+                            sdp: this.pc.localDescription.sdp 
+                        } 
+                    };
+                    console.log('[VideoCall] Sending answer - From:', myId, 'To:', this.peerIdInCall);
                     try {
+                        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                            throw new Error('WebSocket not connected');
+                        }
                         this.ws.send(JSON.stringify(answerMsg));
-                        console.log('[VideoCall] Sent answer');
+                        console.log('[VideoCall] ✓ Answer sent successfully to:', this.peerIdInCall);
                     } catch (err) {
-                        console.error('[VideoCall] Failed to send answer:', err);
+                        console.error('[VideoCall] ✗ Failed to send answer:', err);
                         alert('Failed to send call answer. Please try again.');
                         this.endCall({ notifyPeer: false, reason: 'error' });
                     }
@@ -137,19 +178,119 @@ class VideoCall {
                     this.endCall({ notifyPeer: false, reason: 'error' });
                 }
             } else if (msg.type === 'answer' && msg.data && msg.data.type && msg.data.sdp) {
-                if (!this.isCaller) {
-                    console.warn('[VideoCall] Callee received an answer, ignoring.');
-                    return;
+                // Answer should be received by caller only
+                // Check if we have a local offer (we sent an offer, so we're expecting an answer)
+                const hasLocalOffer = this.pc && this.pc.localDescription && 
+                                     (this.pc.localDescription.type === 'offer');
+                
+                // Also verify the answer is from the peer we're calling
+                const isFromExpectedPeer = !this.peerIdInCall || msg.from === this.peerIdInCall;
+                
+                // Process answer if:
+                // 1. We're marked as caller, OR
+                // 2. We have a local offer (we sent an offer) AND it's from the expected peer
+                if (this.isCaller || (hasLocalOffer && isFromExpectedPeer)) {
+                    // If we have a local offer but isCaller is false, update state
+                    if (hasLocalOffer && !this.isCaller) {
+                        console.log('[VideoCall] Updating state - we sent an offer, so we are the caller');
+                        this.isCaller = true;
+                        if (!this.inCall) {
+                            this.inCall = true;
+                        }
+                        if (!this.peerIdInCall) {
+                            this.peerIdInCall = msg.from;
+                        }
+                    }
+                    
+                    console.log('[VideoCall] Received answer from:', msg.from, 'isCaller:', this.isCaller, 'hasLocalOffer:', hasLocalOffer, 'fromExpectedPeer:', isFromExpectedPeer);
+                    
+                    if (!this.pc) {
+                        console.error('[VideoCall] Received answer but no peer connection!');
+                        return;
+                    }
+                    
+                    // Verify we have a local offer before processing answer
+                    if (!hasLocalOffer) {
+                        console.warn('[VideoCall] Received answer but no local offer found. Ignoring.');
+                        return;
+                    }
+                    
+                    try {
+                        console.log('[VideoCall] Setting remote description (answer) on peer connection');
+                        await this.pc.setRemoteDescription(new RTCSessionDescription(msg.data));
+                        console.log('[VideoCall] ✓ Remote description (answer) set');
+                        
+                        // Process any queued ICE candidates
+                        this._addPendingCandidates();
+                        
+                        console.log('[VideoCall] ✓ Answer processed, connection should establish');
+                    } catch (err) {
+                        console.error('[VideoCall] ✗ Error setting remote description:', err);
+                        alert('Failed to process answer: ' + err.message);
+                    }
+                } else {
+                    // Callee should not receive answers
+                    if (!this.isCaller && !hasLocalOffer) {
+                        console.warn('[VideoCall] Callee received an answer, ignoring. (Callee should send answer, not receive it)');
+                    } else if (!isFromExpectedPeer) {
+                        console.warn('[VideoCall] Received answer from unexpected peer. Expected:', this.peerIdInCall, 'Got:', msg.from);
+                    } else {
+                        console.warn('[VideoCall] Received answer but not expecting it - isCaller:', this.isCaller, 'hasLocalOffer:', hasLocalOffer, 'fromExpectedPeer:', isFromExpectedPeer);
+                    }
                 }
-                console.log('[VideoCall] Received answer');
-                await this.pc.setRemoteDescription(new RTCSessionDescription(msg.data));
-                this._addPendingCandidates();
             } else if (msg.type === 'ice' && msg.data) {
                 // msg.data is the ICE candidate object
-                this._handleRemoteCandidate(new RTCIceCandidate(msg.data));
+                console.log('[VideoCall] Received ICE candidate from:', msg.from, 'My peerIdInCall:', this.peerIdInCall, 'inCall:', this.inCall, 'hasPC:', !!this.pc);
+                
+                // Process ICE candidates if we have a peer connection
+                // Be more lenient - if we have a PC, accept candidates (they might arrive during setup)
+                if (this.pc) {
+                    // If we're in a call, verify it's from the correct peer
+                    // If not in call yet, accept it (might be during call setup)
+                    const shouldProcess = !this.inCall || 
+                                        !this.peerIdInCall || 
+                                        msg.from === this.peerIdInCall;
+                    
+                    if (shouldProcess) {
+                        try {
+                            // msg.data might be a string or object, handle both
+                            let candidateData = msg.data;
+                            if (typeof candidateData === 'string') {
+                                candidateData = JSON.parse(candidateData);
+                            }
+                            const candidate = new RTCIceCandidate(candidateData);
+                            console.log('[VideoCall] ✓ Processing ICE candidate from:', msg.from);
+                            this._handleRemoteCandidate(candidate);
+                        } catch (err) {
+                            console.error('[VideoCall] ✗ Error processing ICE candidate:', err, 'Data:', msg.data);
+                        }
+                    } else {
+                        console.log('[VideoCall] Ignoring ICE candidate - wrong peer. Expected:', this.peerIdInCall, 'Got:', msg.from);
+                    }
+                } else {
+                    console.log('[VideoCall] No peer connection yet, queueing ICE candidate for later');
+                    // Queue candidate if we don't have PC yet
+                    try {
+                        let candidateData = msg.data;
+                        if (typeof candidateData === 'string') {
+                            candidateData = JSON.parse(candidateData);
+                        }
+                        const candidate = new RTCIceCandidate(candidateData);
+                        this.pendingCandidates.push(candidate);
+                        console.log('[VideoCall] Queued ICE candidate (total queued:', this.pendingCandidates.length, ')');
+                    } catch (err) {
+                        console.error('[VideoCall] Error queuing ICE candidate:', err);
+                    }
+                }
             } else if (msg.candidate) {
                 // Fallback for direct candidate format
-                this._handleRemoteCandidate(new RTCIceCandidate(msg));
+                console.log('[VideoCall] Received ICE candidate (fallback format)');
+                try {
+                    const candidate = new RTCIceCandidate(msg);
+                    this._handleRemoteCandidate(candidate);
+                } catch (err) {
+                    console.error('[VideoCall] Error processing ICE candidate (fallback):', err);
+                }
             } else if (msg.type === 'reject') {
                 // Only show alert if we're actually in a call
                 if (this.inCall && msg.from === this.peerIdInCall) {
@@ -166,6 +307,10 @@ class VideoCall {
                     console.log('[VideoCall] Received end_call, but not in active call');
                 }
                 this.endCall({ notifyPeer: false, reason: 'remote' });
+            }
+            } catch (err) {
+                console.error('[VideoCall] Error in WebSocket message handler:', err);
+                // Don't let unhandled errors break the WebSocket connection
             }
         };
     }
@@ -187,6 +332,9 @@ class VideoCall {
             return;
         }
         
+        console.log('[VideoCall] Starting call - My ID:', myId, 'Peer ID:', peerId);
+        console.log('[VideoCall] WebSocket state:', this.ws.readyState, 'Connected:', this.isConnected);
+        
         try {
             this.isCaller = true;
             this.peerIdInCall = peerId;
@@ -199,13 +347,14 @@ class VideoCall {
             const offer = await this.pc.createOffer();
             await this.pc.setLocalDescription(offer);
             const offerMsg = { from: myId, to: peerId, type: 'offer', data: { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp } };
-            console.log('[VideoCall] Sending offer:', offerMsg);
+            console.log('[VideoCall] Sending offer - From:', myId, 'To:', peerId, 'Type:', offerMsg.type);
+            console.log('[VideoCall] Offer message:', JSON.stringify(offerMsg).substring(0, 200) + '...');
             try {
                 this.ws.send(JSON.stringify(offerMsg));
-                console.log('[VideoCall] Sent offer to:', peerId);
+                console.log('[VideoCall] ✓ Offer sent successfully to:', peerId);
                 this.onCallStart({ role: 'caller' });
             } catch (err) {
-                console.error('[VideoCall] Failed to send offer:', err);
+                console.error('[VideoCall] ✗ Failed to send offer:', err);
                 alert('Failed to send call offer. Please try again.');
                 this.endCall({ notifyPeer: false, reason: 'error' });
             }
@@ -217,24 +366,35 @@ class VideoCall {
     }
 
     _setupPeerConnection(myId, peerId) {
+        console.log('[VideoCall] Creating new RTCPeerConnection for peer:', peerId);
         this.pc = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
         });
+        console.log('[VideoCall] ✓ RTCPeerConnection created');
         this.pc.onicecandidate = (e) => {
             if (e.candidate) {
                 if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
                     console.warn('[VideoCall] WebSocket not ready, dropping ICE candidate');
                     return;
                 }
-                const iceMsg = { from: myId, to: peerId, type: 'ice', data: e.candidate };
-                console.log('[VideoCall] Sending ICE candidate:', iceMsg);
+                // Serialize the candidate properly
+                const candidateData = {
+                    candidate: e.candidate.candidate,
+                    sdpMLineIndex: e.candidate.sdpMLineIndex,
+                    sdpMid: e.candidate.sdpMid
+                };
+                const iceMsg = { from: myId, to: peerId, type: 'ice', data: candidateData };
+                console.log('[VideoCall] Sending ICE candidate to:', peerId);
                 try {
                     this.ws.send(JSON.stringify(iceMsg));
                 } catch (err) {
                     console.error('[VideoCall] Failed to send ICE candidate:', err);
                 }
             } else {
-                console.log('[VideoCall] ICE gathering complete');
+                console.log('[VideoCall] ✓ ICE gathering complete');
             }
         };
         this.pc.ontrack = (e) => {
@@ -264,10 +424,38 @@ class VideoCall {
             });
         };
         this.pc.onconnectionstatechange = () => {
-            console.log('[VideoCall] PeerConnection state:', this.pc.connectionState);
-            if (this.pc.connectionState === 'failed' || this.pc.connectionState === 'disconnected') {
-                console.warn('[VideoCall] Connection state changed to:', this.pc.connectionState);
+            const state = this.pc.connectionState;
+            console.log('[VideoCall] PeerConnection state changed to:', state);
+            
+            if (state === 'connected') {
+                console.log('[VideoCall] ✓ Connection established!');
+            } else if (state === 'connecting') {
+                console.log('[VideoCall] Connecting...');
+            } else if (state === 'disconnected') {
+                console.warn('[VideoCall] ⚠ Connection disconnected');
+            } else if (state === 'failed') {
+                console.error('[VideoCall] ✗ Connection failed');
+                alert('WebRTC connection failed. Please try again.');
+            } else if (state === 'closed') {
+                console.log('[VideoCall] Connection closed');
             }
+        };
+        
+        this.pc.oniceconnectionstatechange = () => {
+            const state = this.pc.iceConnectionState;
+            console.log('[VideoCall] ICE connection state:', state);
+            
+            if (state === 'connected' || state === 'completed') {
+                console.log('[VideoCall] ✓ ICE connection established!');
+            } else if (state === 'failed') {
+                console.error('[VideoCall] ✗ ICE connection failed');
+            } else if (state === 'disconnected') {
+                console.warn('[VideoCall] ⚠ ICE connection disconnected');
+            }
+        };
+        
+        this.pc.onicegatheringstatechange = () => {
+            console.log('[VideoCall] ICE gathering state:', this.pc.iceGatheringState);
         };
     }
 
@@ -277,18 +465,34 @@ class VideoCall {
             return;
         }
         if (this.pc.remoteDescription && this.pc.remoteDescription.type) {
-            this.pc.addIceCandidate(candidate).catch(e => console.error('[VideoCall] addIceCandidate error:', e));
+            console.log('[VideoCall] Adding ICE candidate immediately');
+            this.pc.addIceCandidate(candidate)
+                .then(() => {
+                    console.log('[VideoCall] ✓ ICE candidate added successfully');
+                })
+                .catch(e => {
+                    console.error('[VideoCall] ✗ Error adding ICE candidate:', e);
+                });
         } else {
-            console.log('[VideoCall] Queuing ICE candidate until remote description is set');
+            console.log('[VideoCall] Queuing ICE candidate (remote description not set yet)');
             this.pendingCandidates.push(candidate);
         }
     }
 
     _addPendingCandidates() {
         if (this.pendingCandidates.length > 0) {
-            console.log('[VideoCall] Adding queued ICE candidates:', this.pendingCandidates);
-            this.pendingCandidates.forEach(candidate => {
-                this.pc.addIceCandidate(candidate).catch(e => console.error('[VideoCall] addIceCandidate error:', e));
+            console.log('[VideoCall] Adding', this.pendingCandidates.length, 'queued ICE candidates');
+            const promises = this.pendingCandidates.map(candidate => {
+                return this.pc.addIceCandidate(candidate)
+                    .then(() => {
+                        console.log('[VideoCall] ✓ Queued ICE candidate added');
+                    })
+                    .catch(e => {
+                        console.error('[VideoCall] ✗ Error adding queued ICE candidate:', e);
+                    });
+            });
+            Promise.all(promises).then(() => {
+                console.log('[VideoCall] ✓ All queued ICE candidates processed');
             });
             this.pendingCandidates = [];
         }
