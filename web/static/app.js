@@ -1,9 +1,12 @@
+import { VideoCall } from './video_call.js';
+
 class ChatApp {
     constructor() {
         this.ws = null;
         this.currentUser = null;
         this.currentRoom = null;
         this.privateChats = new Map();
+        this.privateUnread = new Map();
         this.init();
     }
 
@@ -18,7 +21,7 @@ class ChatApp {
                 this.loadRooms();
                 this.loadUsers();
             }
-        }, 30000);
+        }, 15000);
     }
 
     bindEvents() {
@@ -68,7 +71,6 @@ class ChatApp {
     connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/api/ws?user_id=${this.currentUser.id}&username=${encodeURIComponent(this.currentUser.username)}`;
-        
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
@@ -287,19 +289,30 @@ class ChatApp {
         const usersList = document.getElementById('usersList');
         usersList.innerHTML = '';
 
-        users.forEach(user => {
+        if (!Array.isArray(users)) {
+            console.error('displayUsers: users is not an array', users);
+            return;
+        }
+
+        users.forEach((user, idx) => {
+            if (!user || typeof user !== 'object' || !user.id) {
+                console.warn('displayUsers: skipping user at index', idx, user);
+                return;
+            }
             if (user.id === this.currentUser.id) return; // Don't show self
-            
             const userElement = document.createElement('div');
             userElement.className = 'user-item';
-            
+            userElement.dataset.userid = user.id;
             userElement.innerHTML = `
                 <span>${user.username}</span>
                 <span class="user-status"></span>
+                <span class="user-unread">0</span>
             `;
-            
             userElement.addEventListener('click', () => this.openPrivateChat(user));
             usersList.appendChild(userElement);
+            // Reflect unread, if any
+            const count = this.privateUnread.get(user.id) || 0;
+            this.updateUnreadBadge(user.id, count);
         });
     }
 
@@ -313,6 +326,8 @@ class ChatApp {
         
         // Store current private chat user
         this.currentPrivateUser = user;
+        // Clear unread for this user
+        this.clearUnreadFor(user.id);
     }
 
     closePrivateChat() {
@@ -350,6 +365,9 @@ class ChatApp {
         if (this.currentPrivateUser && 
             (this.currentPrivateUser.id === message.sender_id || this.currentPrivateUser.id === message.recipient)) {
             this.displayPrivateMessage(message);
+        } else {
+            // Increment unread if chat not focused
+            this.incrementUnreadFor(userId);
         }
 
         // Show notification if chat is not open
@@ -371,25 +389,83 @@ class ChatApp {
         const container = document.getElementById('privateMessages');
         const messageElement = document.createElement('div');
         
-        let messageClass = 'message private';
-        if (message.sender_id === this.currentUser.id) {
-            messageClass += ' own';
+        // Render system messages differently
+        if (message.type === 'system') {
+            messageElement.className = 'message system';
         } else {
-            messageClass += ' other';
+            let messageClass = 'message private';
+            // Some private messages may not have sender_id (depending on server echo),
+            // so fall back to sender username comparison.
+            const isOwn =
+                (message.sender_id && message.sender_id === this.currentUser.id) ||
+                (!message.sender_id && message.sender && this.currentUser && message.sender === this.currentUser.username);
+            if (isOwn) {
+                messageClass += ' own';
+            } else {
+                messageClass += ' other';
+            }
+            messageElement.className = messageClass;
         }
-        
-        messageElement.className = messageClass;
         
         const time = new Date(message.timestamp).toLocaleTimeString();
         
-        messageElement.innerHTML = `
-            <div class="message-header">${message.sender}</div>
-            <div class="message-content">${message.content}</div>
-            <div class="message-time">${time}</div>
-        `;
+        if (message.type === 'system') {
+            messageElement.innerHTML = `
+                <div class="message-content">${message.content}</div>
+                <div class="message-time">${time}</div>
+            `;
+        } else {
+            messageElement.innerHTML = `
+                <div class="message-header">${message.sender}</div>
+                <div class="message-content">${message.content}</div>
+                <div class="message-time">${time}</div>
+            `;
+        }
         
         container.appendChild(messageElement);
         container.scrollTop = container.scrollHeight;
+    }
+
+    addPrivateSystemMessageForCurrentUser(text) {
+        if (!this.currentPrivateUser) return;
+        const message = {
+            id: Math.random().toString(36).slice(2),
+            type: 'system',
+            content: text,
+            sender: 'System',
+            timestamp: new Date().toISOString()
+        };
+        const uid = this.currentPrivateUser.id;
+        if (!this.privateChats.has(uid)) {
+            this.privateChats.set(uid, []);
+        }
+        this.privateChats.get(uid).push(message);
+        this.displayPrivateMessage(message);
+    }
+
+    // Unread helpers
+    updateUnreadBadge(userId, count) {
+        const item = document.querySelector(`#usersList .user-item[data-userid="${userId}"]`);
+        if (!item) return;
+        const badge = item.querySelector('.user-unread');
+        if (!badge) return;
+        if (count > 0) {
+            item.classList.add('has-unread');
+            badge.textContent = String(count);
+        } else {
+            item.classList.remove('has-unread');
+            badge.textContent = '0';
+        }
+    }
+    incrementUnreadFor(userId) {
+        const current = this.privateUnread.get(userId) || 0;
+        const next = current + 1;
+        this.privateUnread.set(userId, next);
+        this.updateUnreadBadge(userId, next);
+    }
+    clearUnreadFor(userId) {
+        this.privateUnread.set(userId, 0);
+        this.updateUnreadBadge(userId, 0);
     }
 
     showNotification(message) {
@@ -402,7 +478,68 @@ class ChatApp {
     }
 }
 
-// Initialize the chat app when DOM is loaded
+// Initialize the chat app and video call integration when DOM is loaded
+let chatApp, groupVideoCall, privateVideoCall;
 document.addEventListener('DOMContentLoaded', () => {
-    new ChatApp();
+    chatApp = new ChatApp();
+    // Group video call
+    groupVideoCall = new VideoCall({
+        localVideoId: 'localVideo',
+        remoteVideoId: 'remoteVideo',
+        startBtnId: 'videoCallBtn',
+        endBtnId: 'endCallBtn',
+        wsUrl: 'ws://' + window.location.hostname + ':9090/ws',
+        getMyId: () => chatApp && chatApp.currentUser ? chatApp.currentUser.id : '',
+        getPeerId: () => {
+            // For group chat, pick the first other user in the room (demo purpose)
+            const users = document.querySelectorAll('#usersList .user-item');
+            for (let u of users) {
+                const userId = u.dataset.userid;
+                if (userId && userId !== (chatApp && chatApp.currentUser ? chatApp.currentUser.id : '')) {
+                    return userId;
+                }
+            }
+            // If no users found, prompt for user ID
+            const peerId = prompt('Enter peer user ID for video call:');
+            if (!peerId || peerId.trim() === '') {
+                return null;
+            }
+            return peerId.trim();
+        },
+        containerId: 'videoCallContainer',
+        onCallStart: () => {
+            chatApp.displayMessage({
+                type: 'system',
+                content: 'Video call started.',
+                timestamp: new Date().toISOString()
+            });
+        },
+        onCallEnd: () => {
+            // Post a system message in the main chat when the call ends
+            chatApp.displayMessage({
+                type: 'system',
+                content: 'Video call ended.',
+                timestamp: new Date().toISOString()
+            });
+        }
+    });
+    // Private video call
+    privateVideoCall = new VideoCall({
+        localVideoId: 'privateLocalVideo',
+        remoteVideoId: 'privateRemoteVideo',
+        startBtnId: 'privateVideoCallBtn',
+        endBtnId: 'privateEndCallBtn',
+        wsUrl: 'ws://' + window.location.hostname + ':9090/ws',
+        getMyId: () => chatApp && chatApp.currentUser ? chatApp.currentUser.id : '',
+        getPeerId: () => chatApp && chatApp.currentPrivateUser ? chatApp.currentPrivateUser.id : '',
+        containerId: 'privateVideoCallContainer',
+        onCallStart: () => {
+            chatApp.addPrivateSystemMessageForCurrentUser('Call started.');
+        },
+        onCallEnd: () => {
+            // Stay in private chat; add a system message
+            chatApp.addPrivateSystemMessageForCurrentUser('Call ended.');
+        }
+    });
 });
+

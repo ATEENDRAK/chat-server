@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<div class="message-input"></div>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -15,6 +15,9 @@
                 <span id="currentRoom"></span>
             </div>
         </header>
+        <div class="beta-banner">
+            🚀 <strong>Beta Preview:</strong> We’re building ChatStream with ❤️. Big features are coming over the next few months — jump in, try it out, and share your feedback!
+        </div>
 
         <!-- Login Form -->
         <div class="login-container" id="loginContainer">
@@ -61,6 +64,14 @@
                     <div class="message-input">
                         <input type="text" id="messageInput" placeholder="Type your message..." maxlength="500">
                         <button id="sendBtn">Send</button>
+                        <button id="videoCallBtn" title="Start Video Call">📹</button>
+                    </div>
+                    <div class="video-call-container" id="videoCallContainer" style="display:none; margin-top:10px;">
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <video id="localVideo" autoplay muted playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                            <video id="remoteVideo" autoplay playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                        </div>
+                        <button id="endCallBtn" class="end-call-btn" style="display:none; margin-top:5px;">⏹ End Call</button>
                     </div>
                 </div>
             </div>
@@ -77,12 +88,21 @@
                 <div class="private-input">
                     <input type="text" id="privateMessageInput" placeholder="Type private message...">
                     <button id="sendPrivateBtn">Send</button>
+                    <button id="privateVideoCallBtn" title="Start Video Call">📹</button>
+                </div>
+                <div class="video-call-container" id="privateVideoCallContainer" style="display:none; margin-top:10px;">
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <video id="privateLocalVideo" autoplay muted playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                        <video id="privateRemoteVideo" autoplay playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                    </div>
+                    <button id="privateEndCallBtn" class="end-call-btn" style="display:none; margin-top:5px;">⏹ End Call</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js" type="module"></script>
+    <script src="/static/video_call.js" type="module"></script>
 </body>
 </html>
 
