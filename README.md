@@ -50,6 +50,41 @@ A scalable real-time chat application built with Go, WebSockets, and a modern we
 4. **Open your browser**
    Navigate to `http://localhost:8080`
 
+## Architecture
+
+The application runs as a **single unified server** that includes:
+- **Chat Service** - Real-time messaging via WebSocket (`/api/ws`)
+- **Video Service** - WebRTC signaling for video calls (`/video/ws`)
+
+### Endpoints
+| Endpoint | Description |
+|----------|-------------|
+| `/` | Web UI |
+| `/api/ws` | Chat WebSocket connection |
+| `/api/rooms` | Room management API |
+| `/api/users` | User listing API |
+| `/video/ws` | Video signaling WebSocket |
+| `/healthz` | Health check endpoint |
+
+## Cloud Run Deployment
+
+The application is designed for single-container deployment:
+
+```bash
+# Build Docker image
+docker build -t chatstream .
+
+# Run locally with Docker
+docker run -p 8080:8080 chatstream
+
+# Deploy to Cloud Run
+gcloud run deploy chatstream --source . --port 8080
+```
+
+Environment variables:
+- `CHAT_PORT` - Server port (default: 8080)
+- `GIN_MODE` - Set to `release` for production
+
 ## API Endpoints
 
 ### WebSocket

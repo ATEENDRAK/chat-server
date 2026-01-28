@@ -67,9 +67,16 @@
                         <button id="videoCallBtn" title="Start Video Call">📹</button>
                     </div>
                     <div class="video-call-container" id="videoCallContainer" style="display:none; margin-top:10px;">
-                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                            <video id="localVideo" autoplay muted playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
-                            <video id="remoteVideo" autoplay playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                        <div class="video-grid" id="videoGrid" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+                            <div class="video-wrapper">
+                                <div class="video-label" id="localVideoLabel">You</div>
+                                <video id="localVideo" autoplay muted playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                            </div>
+                            <!-- Remote videos will be added dynamically here -->
+                            <div class="video-wrapper" id="remoteVideoWrapper">
+                                <div class="video-label" id="remoteVideoLabel">Connecting...</div>
+                                <video id="remoteVideo" autoplay playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                            </div>
                         </div>
                         <button id="endCallBtn" class="end-call-btn" style="display:none; margin-top:5px;">⏹ End Call</button>
                     </div>
@@ -92,14 +99,83 @@
                 </div>
                 <div class="video-call-container" id="privateVideoCallContainer" style="display:none; margin-top:10px;">
                     <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <video id="privateLocalVideo" autoplay muted playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
-                        <video id="privateRemoteVideo" autoplay playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                        <div class="video-wrapper">
+                            <div class="video-label" id="privateLocalVideoLabel">You</div>
+                            <video id="privateLocalVideo" autoplay muted playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                        </div>
+                        <div class="video-wrapper">
+                            <div class="video-label" id="privateRemoteVideoLabel">Connecting...</div>
+                            <video id="privateRemoteVideo" autoplay playsinline style="width: 180px; border: 1px solid #ccc; background: #000;"></video>
+                        </div>
                     </div>
                     <button id="privateEndCallBtn" class="end-call-btn" style="display:none; margin-top:5px;">⏹ End Call</button>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- User Selection Modal for Group Calls -->
+    <div class="modal" id="userSelectionModal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>📹 Select Users to Call</h3>
+                <button class="close-btn" id="closeUserSelection">&times;</button>
+            </div>
+            <div style="padding: 15px;">
+                <div style="margin-bottom: 15px;">
+                    <button id="selectAllUsersBtn" style="width: 100%; padding: 10px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                        📞 Call All Users in Room
+                    </button>
+                </div>
+                <div style="border-top: 1px solid #ddd; padding-top: 15px; margin-bottom: 10px;">
+                    <strong>Or select specific users:</strong>
+                </div>
+                <div id="userCheckboxList" style="max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
+                    <!-- User checkboxes will be added dynamically -->
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button id="cancelUserSelectionBtn" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer;">Cancel</button>
+                    <button id="startGroupCallBtn" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">Start Call</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Incoming Call Dialog -->
+    <div class="modal" id="incomingCallModal" style="display: none;">
+        <div class="modal-content" style="max-width: 350px; text-align: center;">
+            <div class="modal-header">
+                <h3>📞 Incoming Video Call</h3>
+            </div>
+            <div style="padding: 20px;">
+                <p id="incomingCallMessage">Someone is calling you...</p>
+                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                    <button id="acceptCallBtn" style="background: #28a745; color: white; padding: 10px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">✓ Accept</button>
+                    <button id="rejectCallBtn" style="background: #dc3545; color: white; padding: 10px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">✕ Reject</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+        /* In-call indicator for users */
+        .user-in-call {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        .user-in-call::after {
+            content: ' 📹';
+        }
+        .in-call-badge {
+            display: inline-block;
+            background: #dc3545;
+            color: white;
+            font-size: 0.7rem;
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-left: 5px;
+        }
+    </style>
 
     <script src="/static/app.js" type="module"></script>
 </body>

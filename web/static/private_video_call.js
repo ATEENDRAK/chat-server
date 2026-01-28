@@ -1,9 +1,38 @@
 // private_video_call.js - Private video call implementation
 
-import { VideoCallBase } from './video_call_base.js';
+import { VideoCallBase, showIncomingCallDialog } from './video_call_base.js';
 
 class PrivateVideoCall extends VideoCallBase {
+    // Check if this handler should process the message
+    shouldHandleMessage(msg) {
+        // PrivateVideoCall handles messages when:
+        // 1. We're already in a call with this peer (continue handling)
+        // 2. Private chat IS open (we're in private chat view)
+        
+        // If we're in a call with this peer, always handle
+        if (this.inCall && this.peerIdInCall === msg.from) {
+            return true;
+        }
+        
+        // For new calls, only handle if private chat is open
+        const privateChatModal = document.getElementById('privateChatModal');
+        const isPrivateChatOpen = privateChatModal && privateChatModal.style.display !== 'none';
+        return isPrivateChatOpen;
+    }
+    
     async handleMessage(msg, myId) {
+        // First check if we should handle this message at all
+        if (!this.shouldHandleMessage(msg)) {
+            console.log('[PrivateVideoCall] Delegating to GroupVideoCall (private chat is not open)');
+            return;
+        }
+        
+        // Skip if we're already in a call with a DIFFERENT peer
+        if (this.inCall && msg.from !== this.peerIdInCall && (msg.type === 'offer' || msg.type === 'answer')) {
+            console.log('[PrivateVideoCall] Already in call with different peer, ignoring');
+            return;
+        }
+        
         if (msg.type === 'offer' && msg.data && msg.data.type && msg.data.sdp) {
             if (this.isCaller) {
                 console.warn('[PrivateVideoCall] Caller received an offer, ignoring.');
@@ -15,11 +44,18 @@ class PrivateVideoCall extends VideoCallBase {
                 return;
             }
             
-            const accept = window.confirm('Incoming video call. Accept?');
+            // Get caller's name for the dialog
+            const callerName = this._getCallerName ? this._getCallerName(msg.from) : msg.from;
+            console.log('[PrivateVideoCall] Showing incoming call dialog for:', callerName);
+            
+            const accept = await showIncomingCallDialog(callerName);
+            console.log('[PrivateVideoCall] User response to call:', accept ? 'ACCEPTED' : 'REJECTED');
+            
             if (!accept) {
                 const rejectMsg = { from: myId, to: msg.from, type: 'reject' };
                 try {
                     this.ws.send(JSON.stringify(rejectMsg));
+                    console.log('[PrivateVideoCall] Sent reject to:', msg.from);
                 } catch (err) {
                     console.error('[PrivateVideoCall] Failed to send reject:', err);
                 }

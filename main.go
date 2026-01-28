@@ -4,8 +4,10 @@ import (
 	"chatstreamapp/internal/api"
 	"chatstreamapp/internal/hub"
 	"chatstreamapp/internal/logger"
+	"chatstreamapp/internal/videoservice"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,19 +18,33 @@ func main() {
 			fmt.Printf("❌ Server panicked: %v\n", r)
 		}
 	}()
-	
+
 	fmt.Println("🚀 Starting ChatStream Server...")
-	
-	// Initialize the WebSocket hub
+
+	// Get ports from environment or use defaults
+	chatPort := os.Getenv("CHAT_PORT")
+	if chatPort == "" {
+		chatPort = "8080"
+	}
+	videoPort := os.Getenv("VIDEO_PORT")
+	if videoPort == "" {
+		videoPort = "9090"
+	}
+
+	// Initialize the Chat WebSocket hub
 	chatHub := hub.NewHub()
 	go chatHub.Run()
-	fmt.Println("✅ WebSocket hub initialized")
+	fmt.Println("✅ Chat WebSocket hub initialized")
+
+	// Initialize the Video Signaling hub
+	videoHub := videoservice.NewHub()
+	go videoHub.Run()
+	fmt.Println("✅ Video Signaling hub initialized")
 
 	// Setup Gin router
 	router := gin.Default()
 	fmt.Println("✅ Gin router initialized")
-	
-	// Add debug output
+
 	logger.Info("Initializing chat server...")
 	logger.Info("Setting up routes...")
 
@@ -37,12 +53,12 @@ func main() {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		
+
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
 		}
-		
+
 		c.Next()
 	})
 
@@ -50,18 +66,46 @@ func main() {
 	router.Static("/static", "./web/static")
 	router.StaticFile("/", "./web/index.html")
 
-	// Initialize API routes
+	// Initialize Chat API routes
 	api.SetupRoutes(router, chatHub)
 
-	// Start server
-	fmt.Println("🌐 Server starting on http://localhost:8080")
-	fmt.Println("🎯 Ready for connections!")
-	fmt.Println("📱 Open http://localhost:8080 in your browser to start chatting")
-	fmt.Println("⏹️  Press Ctrl+C to stop the server")
-	
-	logger.Info("Chat server starting on :8080")
+	// Initialize Video Service routes under /video prefix
+	videoGroup := router.Group("/video")
+	videoservice.SetupRoutes(videoGroup, videoHub)
+
+	// Health check endpoint
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ok",
+			"services": gin.H{
+				"chat":  "running",
+				"video": "running",
+			},
+		})
+	})
+
+	// Print startup info
+	fmt.Println("")
+	fmt.Println("┌─────────────────────────────────────────────────────┐")
+	fmt.Println("│  🎉 ChatStream is running!                          │")
+	fmt.Println("│                                                     │")
+	fmt.Printf("│  💬 Chat + Video: http://localhost:%-17s│\n", chatPort)
+	fmt.Println("│                                                     │")
+	fmt.Println("│  Endpoints:                                         │")
+	fmt.Println("│    /           - Web UI                             │")
+	fmt.Println("│    /api/ws     - Chat WebSocket                     │")
+	fmt.Println("│    /video/ws   - Video Signaling WebSocket          │")
+	fmt.Println("│    /healthz    - Health Check                       │")
+	fmt.Println("│                                                     │")
+	fmt.Println("│  📱 Open the URL above in your browser              │")
+	fmt.Println("│  ⏹️  Press Ctrl+C to stop the server                 │")
+	fmt.Println("└─────────────────────────────────────────────────────┘")
+	fmt.Println("")
+
+	logger.Infof("Chat server starting on :%s", chatPort)
 	logger.Info("Server ready to accept connections...")
-	if err := http.ListenAndServe(":8080", router); err != nil {
+
+	if err := http.ListenAndServe(":"+chatPort, router); err != nil {
 		fmt.Printf("❌ Server failed to start: %v\n", err)
 		logger.Errorf("Server failed to start: %v", err)
 	}
